@@ -1,0 +1,265 @@
+{
+  "name": "CV-Scorer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cv-scorer",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryPropertyName": "cv"
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [240, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const input = $input.first();\nconst binaries = input.binary ?? {};\nreturn Object.values(binaries).map((bin, idx) => ({\n  json: { originalFilename: bin.fileName, index: idx },\n  binary: { cv0: bin }\n}));"
+      },
+      "id": "split-binaries",
+      "name": "SplitBinaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [350, 300]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "cv0",
+        "options": {}
+      },
+      "id": "extract-pdf-text",
+      "name": "ExtractPdfText",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [460, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "filename",
+              "value": "={{ $('SplitBinaries').item.json.originalFilename }}",
+              "type": "string"
+            },
+            {
+              "id": "2",
+              "name": "cv_text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "3",
+              "name": "prompt",
+              "value": "=Eres un evaluador de CVs técnicos especializado en perfiles de automatización e integración.\n\nAnaliza el siguiente CV y responde ÚNICAMENTE con un JSON válido (sin markdown, sin texto adicional) con esta estructura exacta:\n{\n  \"score\": (número del 0 al 100),\n  \"nivel\": (\"Junior\" | \"Mid\" | \"Senior\"),\n  \"fortalezas\": [lista de strings],\n  \"red_flags\": [lista de strings],\n  \"recomendacion\": (string corto)\n}\n\nCV:\n{{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "build-prompt",
+      "name": "BuildPrompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.prompt) }}\n    }\n  ]\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "call-claude-api",
+      "name": "CallClaudeApi",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [900, 300],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const item = $input.item.json;\nconst rawText = item.content?.[0]?.text ?? '';\n\nlet parsed;\ntry {\n  const cleaned = rawText.trim().replace(/^```json\\s*/i, '').replace(/```$/, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (err) {\n  throw new Error('No se pudo parsear el JSON de Claude: ' + err.message + ' | raw=' + rawText);\n}\n\nconst meta = $('BuildPrompt').all()[$itemIndex].json;\n\nreturn {\n  json: {\n    timestamp: new Date().toISOString(),\n    filename: meta.filename,\n    score: parsed.score,\n    nivel: parsed.nivel,\n    fortalezas: Array.isArray(parsed.fortalezas) ? parsed.fortalezas : [],\n    red_flags: Array.isArray(parsed.red_flags) ? parsed.red_flags : [],\n    recomendacion: parsed.recomendacion\n  }\n};"
+      },
+      "id": "parse-json-response",
+      "name": "ParseJsonResponse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEETS_CV_SCORER_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Hoja 1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "nombre_archivo": "={{ $json.filename }}",
+            "score": "={{ $json.score }}",
+            "nivel": "={{ $json.nivel }}",
+            "fortalezas": "={{ $json.fortalezas.join(', ') }}",
+            "red_flags": "={{ $json.red_flags.join(', ') }}",
+            "recomendacion": "={{ $json.recomendacion }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {"id": "timestamp", "displayName": "timestamp", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "nombre_archivo", "displayName": "nombre_archivo", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "score", "displayName": "score", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": true},
+            {"id": "nivel", "displayName": "nivel", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "fortalezas", "displayName": "fortalezas", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "red_flags", "displayName": "red_flags", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "recomendacion", "displayName": "recomendacion", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true}
+          ]
+        },
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        }
+      },
+      "id": "append-to-sheets",
+      "name": "AppendToSheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1340, 300],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GoogleSheets",
+          "name": "GoogleSheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, result: $('ParseJsonResponse').first().json }) }}",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "RespondToWebhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const payload = $input.first()?.json ?? {};\nconst err = payload.error ?? payload;\nconst message = err?.message ?? (typeof err === 'string' ? err : JSON.stringify(err));\nreturn [{\n  json: {\n    ok: false,\n    error: message,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "error-handler",
+      "name": "ErrorHandler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 540]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 500,
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond-error",
+      "name": "RespondError",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1340, 540]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "SplitBinaries", "type": "main", "index": 0 }]]
+    },
+    "SplitBinaries": {
+      "main": [[{ "node": "ExtractPdfText", "type": "main", "index": 0 }]]
+    },
+    "ExtractPdfText": {
+      "main": [
+        [{ "node": "BuildPrompt", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "BuildPrompt": {
+      "main": [[{ "node": "CallClaudeApi", "type": "main", "index": 0 }]]
+    },
+    "CallClaudeApi": {
+      "main": [
+        [{ "node": "ParseJsonResponse", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "ParseJsonResponse": {
+      "main": [
+        [{ "node": "AppendToSheets", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "AppendToSheets": {
+      "main": [
+        [{ "node": "RespondToWebhook", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "ErrorHandler": {
+      "main": [[{ "node": "RespondError", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "cv-scorer-portfolio"
+  }
+}

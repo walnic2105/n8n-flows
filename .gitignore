@@ -1,0 +1,34 @@
+# Variables de entorno con secretos reales
+.env
+.env.local
+.env.*.local
+
+# Credenciales
+credentials/
+*.key
+*.pem
+service-account*.json
+google-sa*.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencias
+node_modules/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# n8n local
+.n8n/
+
+# Skills (locales, no se versionan)
+skills/
+.claude

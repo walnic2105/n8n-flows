@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CV-Scorer Output",
+  "description": "Estructura JSON que Claude debe devolver al evaluar un CV. El flujo parsea esta salida y la persiste en Google Sheets.",
+  "type": "object",
+  "required": ["score", "nivel", "fortalezas", "red_flags", "recomendacion"],
+  "additionalProperties": false,
+  "properties": {
+    "score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Puntaje global del CV (0-100)."
+    },
+    "nivel": {
+      "type": "string",
+      "enum": ["Junior", "Mid", "Senior"],
+      "description": "Nivel inferido del candidato."
+    },
+    "fortalezas": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Lista corta de fortalezas detectadas."
+    },
+    "red_flags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Lista de alertas o aspectos negativos detectados. Puede estar vacía."
+    },
+    "recomendacion": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Recomendación breve y accionable (1-2 frases)."
+    }
+  },
+  "examples": [
+    {
+      "score": 78,
+      "nivel": "Mid",
+      "fortalezas": [
+        "Experiencia con integraciones REST",
+        "Uso de Google Workspace APIs",
+        "Documentación técnica clara"
+      ],
+      "red_flags": [
+        "Sin evidencia de pruebas automatizadas",
+        "Huecos de empleo sin explicar"
+      ],
+      "recomendacion": "Avanzar a entrevista técnica enfocada en testing y diseño de pipelines."
+    }
+  ]
+}
