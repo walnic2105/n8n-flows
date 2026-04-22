@@ -1,0 +1,364 @@
+{
+  "name": "Onboarding-Simulado",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Onboarding de nuevo colaborador",
+        "formDescription": "Completa los datos del nuevo colaborador. Se creará su cuenta en Google Workspace, se añadirá al grupo del departamento, se notificará al equipo en Slack y se registrará en Airtable.",
+        "formFields": {
+          "values": [
+            { "fieldLabel": "Nombre", "fieldType": "text", "requiredField": true },
+            { "fieldLabel": "Apellido", "fieldType": "text", "requiredField": true },
+            { "fieldLabel": "Email personal", "fieldType": "email", "requiredField": true },
+            { "fieldLabel": "Departamento", "fieldType": "dropdown", "requiredField": true, "fieldOptions": { "values": [ { "option": "engineering" }, { "option": "sales" }, { "option": "ops" }, { "option": "marketing" }, { "option": "hr" } ] } },
+            { "fieldLabel": "Rol", "fieldType": "text", "requiredField": true, "placeholder": "ej. Software Engineer" },
+            { "fieldLabel": "Fecha de inicio", "fieldType": "date", "requiredField": true },
+            { "fieldLabel": "Email del manager", "fieldType": "email", "requiredField": true, "placeholder": "manager@demo.tudominio.com" }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "form-trigger",
+      "name": "FormTrigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_BASE_ID }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_TABLE_DEPARTAMENTOS }}",
+          "mode": "id"
+        },
+        "filterByFormula": "={{ \"{nombre} = '\" + $json.Departamento + \"'\" }}",
+        "options": {}
+      },
+      "id": "lookup-department",
+      "name": "LookupDepartmentGroup",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [440, 300],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "airtableTokenApi": { "id": "AirtableToken", "name": "AirtableToken" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const dept = $input.item.json;\nconst form = $('FormTrigger').item.json;\n\nif (!dept || !dept.groupEmail) {\n  throw new Error('Departamento no encontrado en Airtable: ' + form['Departamento']);\n}\n\nconst normalize = (s) => s\n  .toLowerCase()\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '')\n  .replace(/[^a-z0-9]/g, '');\n\nconst nombre = normalize(form['Nombre']);\nconst apellido = normalize(form['Apellido']);\nconst domain = $env.GOOGLE_WORKSPACE_DOMAIN;\nconst emailCorporativo = `${nombre}.${apellido}@${domain}`;\n\nconst passwordTemporal = [...crypto.getRandomValues(new Uint8Array(9))]\n  .map(b => 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 56])\n  .join('') + '!';\n\nreturn {\n  json: {\n    nombre: form['Nombre'],\n    apellido: form['Apellido'],\n    emailPersonal: form['Email personal'],\n    departamento: form['Departamento'],\n    rol: form['Rol'],\n    fechaInicio: form['Fecha de inicio'],\n    managerEmail: form['Email del manager'],\n    emailCorporativo,\n    passwordTemporal,\n    groupEmail: dept.groupEmail,\n    slackChannel: dept.slackChannel || $env.SLACK_CHANNEL_ONBOARDING\n  }\n};"
+      },
+      "id": "generate-credentials",
+      "name": "GenerateCredentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "kind", "value": "admin#directory#user", "type": "string" },
+            { "id": "2", "name": "id", "value": "={{ Math.floor(Math.random() * 1e18).toString() }}", "type": "string" },
+            { "id": "3", "name": "primaryEmail", "value": "={{ $json.emailCorporativo }}", "type": "string" },
+            { "id": "4", "name": "name.givenName", "value": "={{ $json.nombre }}", "type": "string" },
+            { "id": "5", "name": "name.familyName", "value": "={{ $json.apellido }}", "type": "string" },
+            { "id": "6", "name": "name.fullName", "value": "={{ $json.nombre + ' ' + $json.apellido }}", "type": "string" },
+            { "id": "7", "name": "isMailboxSetup", "value": false, "type": "boolean" },
+            { "id": "8", "name": "changePasswordAtNextLogin", "value": true, "type": "boolean" },
+            { "id": "9", "name": "creationTime", "value": "={{ $now.toISO() }}", "type": "string" },
+            { "id": "10", "name": "_mock", "value": true, "type": "boolean" }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "create-workspace-user",
+      "name": "CreateWorkspaceUser",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [840, 300],
+      "onError": "continueErrorOutput",
+      "notes": "MOCK del Admin SDK. En producción: HTTP POST a https://admin.googleapis.com/admin/directory/v1/users con credencial googleApi (OAuth2 admin o Service Account con DWD)."
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "kind", "value": "admin#directory#member", "type": "string" },
+            { "id": "2", "name": "id", "value": "={{ Math.floor(Math.random() * 1e18).toString() }}", "type": "string" },
+            { "id": "3", "name": "email", "value": "={{ $('GenerateCredentials').item.json.emailCorporativo }}", "type": "string" },
+            { "id": "4", "name": "role", "value": "MEMBER", "type": "string" },
+            { "id": "5", "name": "type", "value": "USER", "type": "string" },
+            { "id": "6", "name": "status", "value": "ACTIVE", "type": "string" },
+            { "id": "7", "name": "groupEmail", "value": "={{ $('GenerateCredentials').item.json.groupEmail }}", "type": "string" },
+            { "id": "8", "name": "_mock", "value": true, "type": "boolean" }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "add-user-to-group",
+      "name": "AddUserToGroup",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1040, 300],
+      "onError": "continueErrorOutput",
+      "notes": "MOCK del Admin SDK. En producción: HTTP POST a https://admin.googleapis.com/admin/directory/v1/groups/{groupEmail}/members con credencial googleApi."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $env.SLACK_CHANNEL_ONBOARDING }}",
+          "mode": "id"
+        },
+        "messageType": "block",
+        "blocksUi": "={\n  \"blocks\": [\n    { \"type\": \"header\", \"text\": { \"type\": \"plain_text\", \"text\": \"🎉 Nuevo colaborador: \" + $('GenerateCredentials').item.json.nombre + \" \" + $('GenerateCredentials').item.json.apellido } },\n    { \"type\": \"section\", \"fields\": [\n      { \"type\": \"mrkdwn\", \"text\": \"*Rol:*\\n\" + $('GenerateCredentials').item.json.rol },\n      { \"type\": \"mrkdwn\", \"text\": \"*Departamento:*\\n\" + $('GenerateCredentials').item.json.departamento },\n      { \"type\": \"mrkdwn\", \"text\": \"*Fecha de inicio:*\\n\" + $('GenerateCredentials').item.json.fechaInicio },\n      { \"type\": \"mrkdwn\", \"text\": \"*Manager:*\\n\" + $('GenerateCredentials').item.json.managerEmail }\n    ]},\n    { \"type\": \"section\", \"text\": { \"type\": \"mrkdwn\", \"text\": \"*Email corporativo:* `\" + $('GenerateCredentials').item.json.emailCorporativo + \"`\\n*Grupo asignado:* `\" + $('GenerateCredentials').item.json.groupEmail + \"`\" } },\n    { \"type\": \"context\", \"elements\": [ { \"type\": \"mrkdwn\", \"text\": \"La contraseña temporal se envió al email personal. Debe cambiarla en el primer inicio de sesión.\" } ] }\n  ]\n}",
+        "otherOptions": {}
+      },
+      "id": "notify-onboarding-channel",
+      "name": "NotifyOnboardingChannel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [1240, 300],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "slackApi": { "id": "SlackBot", "name": "SlackBot" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_BASE_ID }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_TABLE_COLABORADORES }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "nombre": "={{ $('GenerateCredentials').item.json.nombre }}",
+            "apellido": "={{ $('GenerateCredentials').item.json.apellido }}",
+            "emailCorporativo": "={{ $('GenerateCredentials').item.json.emailCorporativo }}",
+            "emailPersonal": "={{ $('GenerateCredentials').item.json.emailPersonal }}",
+            "departamento": "={{ $('GenerateCredentials').item.json.departamento }}",
+            "rol": "={{ $('GenerateCredentials').item.json.rol }}",
+            "fechaInicio": "={{ $('GenerateCredentials').item.json.fechaInicio }}",
+            "managerEmail": "={{ $('GenerateCredentials').item.json.managerEmail }}",
+            "estado": "activo",
+            "createdAt": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "nombre", "displayName": "nombre", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "apellido", "displayName": "apellido", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "emailCorporativo", "displayName": "emailCorporativo", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "emailPersonal", "displayName": "emailPersonal", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "departamento", "displayName": "departamento", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "rol", "displayName": "rol", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "fechaInicio", "displayName": "fechaInicio", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "managerEmail", "displayName": "managerEmail", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "estado", "displayName": "estado", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "createdAt", "displayName": "createdAt", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-to-airtable",
+      "name": "LogToAirtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [1440, 300],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "airtableTokenApi": { "id": "AirtableToken", "name": "AirtableToken" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "ok", "value": true, "type": "boolean" },
+            { "id": "2", "name": "emailCorporativo", "value": "={{ $('GenerateCredentials').item.json.emailCorporativo }}", "type": "string" },
+            { "id": "3", "name": "departamento", "value": "={{ $('GenerateCredentials').item.json.departamento }}", "type": "string" },
+            { "id": "4", "name": "grupoAsignado", "value": "={{ $('GenerateCredentials').item.json.groupEmail }}", "type": "string" },
+            { "id": "5", "name": "mensaje", "value": "=Colaborador registrado correctamente. Revisa Slack para la bienvenida.", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "build-response",
+      "name": "BuildResponse",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1640, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const payload = $input.first()?.json ?? {};\nconst err = payload.error ?? payload;\nconst message = err?.message ?? (typeof err === 'string' ? err : JSON.stringify(err));\n\nconst form = $('FormTrigger').item?.json ?? {};\nconst creds = (() => { try { return $('GenerateCredentials').item.json; } catch (e) { return {}; } })();\n\nreturn [{\n  json: {\n    ok: false,\n    error: message,\n    timestamp: new Date().toISOString(),\n    nombre: creds.nombre ?? form['Nombre'] ?? '',\n    apellido: creds.apellido ?? form['Apellido'] ?? '',\n    emailCorporativo: creds.emailCorporativo ?? '',\n    emailPersonal: creds.emailPersonal ?? form['Email personal'] ?? '',\n    departamento: creds.departamento ?? form['Departamento'] ?? '',\n    rol: creds.rol ?? form['Rol'] ?? '',\n    fechaInicio: creds.fechaInicio ?? form['Fecha de inicio'] ?? '',\n    managerEmail: creds.managerEmail ?? form['Email del manager'] ?? ''\n  }\n}];"
+      },
+      "id": "error-handler",
+      "name": "ErrorHandler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 540]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $env.SLACK_CHANNEL_ERRORS }}",
+          "mode": "id"
+        },
+        "text": "=:warning: *Fallo en onboarding* — {{ $json.nombre }} {{ $json.apellido }} ({{ $json.departamento }})\\n*Error:* `{{ $json.error }}`\\n*Timestamp:* {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "id": "notify-error-channel",
+      "name": "NotifyErrorChannel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [1240, 540],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "slackApi": { "id": "SlackBot", "name": "SlackBot" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_BASE_ID }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_TABLE_COLABORADORES }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "nombre": "={{ $json.nombre }}",
+            "apellido": "={{ $json.apellido }}",
+            "emailCorporativo": "={{ $json.emailCorporativo }}",
+            "emailPersonal": "={{ $json.emailPersonal }}",
+            "departamento": "={{ $json.departamento }}",
+            "rol": "={{ $json.rol }}",
+            "fechaInicio": "={{ $json.fechaInicio }}",
+            "managerEmail": "={{ $json.managerEmail }}",
+            "estado": "error",
+            "createdAt": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "nombre", "displayName": "nombre", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "apellido", "displayName": "apellido", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "emailCorporativo", "displayName": "emailCorporativo", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "emailPersonal", "displayName": "emailPersonal", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "departamento", "displayName": "departamento", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "rol", "displayName": "rol", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "fechaInicio", "displayName": "fechaInicio", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "managerEmail", "displayName": "managerEmail", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "estado", "displayName": "estado", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "createdAt", "displayName": "createdAt", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-error-to-airtable",
+      "name": "LogErrorToAirtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [1440, 540],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "airtableTokenApi": { "id": "AirtableToken", "name": "AirtableToken" }
+      }
+    }
+  ],
+  "connections": {
+    "FormTrigger": {
+      "main": [[{ "node": "LookupDepartmentGroup", "type": "main", "index": 0 }]]
+    },
+    "LookupDepartmentGroup": {
+      "main": [
+        [{ "node": "GenerateCredentials", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "GenerateCredentials": {
+      "main": [
+        [{ "node": "CreateWorkspaceUser", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "CreateWorkspaceUser": {
+      "main": [
+        [{ "node": "AddUserToGroup", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "AddUserToGroup": {
+      "main": [
+        [{ "node": "NotifyOnboardingChannel", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "NotifyOnboardingChannel": {
+      "main": [
+        [{ "node": "LogToAirtable", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "LogToAirtable": {
+      "main": [
+        [{ "node": "BuildResponse", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "ErrorHandler": {
+      "main": [[{ "node": "NotifyErrorChannel", "type": "main", "index": 0 }]]
+    },
+    "NotifyErrorChannel": {
+      "main": [[{ "node": "LogErrorToAirtable", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "onboarding-simulado-portfolio"
+  }
+}

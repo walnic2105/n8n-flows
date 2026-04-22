@@ -1,0 +1,411 @@
+{
+  "name": "Resumidor-Operativo",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "ScheduleTrigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-80, 320],
+      "notes": "Cron: 8:00 AM de lunes a viernes. Usa la zona horaria configurada en n8n (GENERIC_TIMEZONE)."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEETS_CV_SCORER_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1"
+        },
+        "range": "A:G",
+        "options": {}
+      },
+      "id": "read-sheet-data",
+      "name": "ReadSheetData",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [160, 320],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eXzANracpYd71sE2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst tz = 'America/Mexico_City';\n\n// Calcular 'ayer' en la zona horaria de operaciones (yyyy-MM-dd)\nconst fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });\nconst nowLocal = new Date();\nconst yesterday = new Date(nowLocal.getTime() - 24 * 60 * 60 * 1000);\nconst yyyyMMdd = fmt.format(yesterday);\n\nconst filtered = items.filter(i => {\n  const ts = i.json.timestamp;\n  if (!ts || typeof ts !== 'string') return false;\n  // El timestamp es ISO-8601 UTC; convertir a fecha local\n  const d = new Date(ts);\n  if (isNaN(d.getTime())) return false;\n  return fmt.format(d) === yyyyMMdd;\n});\n\nif (filtered.length === 0) {\n  return [{\n    json: {\n      hasData: false,\n      fecha: yyyyMMdd,\n      count: 0\n    }\n  }];\n}\n\nconst scores = filtered.map(i => Number(i.json.score) || 0);\nconst avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);\nconst maxScore = Math.max(...scores);\nconst minScore = Math.min(...scores);\n\nconst niveles = filtered.reduce((acc, i) => {\n  const nivel = (i.json.nivel || 'Desconocido').toString();\n  acc[nivel] = (acc[nivel] || 0) + 1;\n  return acc;\n}, {});\n\nconst splitCsv = (s) => (s || '').toString().split(',').map(x => x.trim()).filter(Boolean);\nconst allFortalezas = filtered.flatMap(i => splitCsv(i.json.fortalezas));\nconst allRedFlags = filtered.flatMap(i => splitCsv(i.json.red_flags));\n\n// Conteo por frecuencia para identificar patrones\nconst tally = (arr) => {\n  const map = new Map();\n  for (const s of arr) map.set(s, (map.get(s) || 0) + 1);\n  return [...map.entries()]\n    .sort((a, b) => b[1] - a[1])\n    .slice(0, 5)\n    .map(([texto, veces]) => `${texto} (x${veces})`);\n};\n\nconst datosFormateados = filtered.map((i, idx) => {\n  const j = i.json;\n  return `${idx + 1}. ${j.nombre_archivo || 'sin-nombre'} | score=${j.score} | nivel=${j.nivel} | rec=${j.recomendacion}`;\n}).join('\\n');\n\nreturn [{\n  json: {\n    hasData: true,\n    fecha: yyyyMMdd,\n    count: filtered.length,\n    avgScore,\n    maxScore,\n    minScore,\n    niveles,\n    topFortalezas: tally(allFortalezas),\n    topRedFlags: tally(allRedFlags),\n    datosFormateados\n  }\n}];\n"
+      },
+      "id": "aggregate-and-filter",
+      "name": "AggregateAndFilter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [380, 320],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.hasData }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-data",
+      "name": "IfHasData",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [600, 320]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "prompt",
+              "value": "=Eres un analista de operaciones de talento. Recibes datos agregados de las evaluaciones de CVs procesadas ayer por el pipeline CV-Scorer.\n\nGenera un resumen ejecutivo en español respondiendo ÚNICAMENTE con un JSON válido (sin markdown, sin texto adicional) con esta estructura:\n{\n  \"resumen\": (una oración que sintetice el día),\n  \"observaciones\": [máx 3 puntos clave sobre el pool de candidatos],\n  \"alertas\": [lista de anomalías o patrones preocupantes — vacía si no hay],\n  \"recomendacion\": (acción concreta para hoy)\n}\n\nSé conciso. Máximo 150 palabras totales.\n\nDatos del día {{ $json.fecha }}:\n- Total de CVs evaluados: {{ $json.count }}\n- Score promedio: {{ $json.avgScore }} (min {{ $json.minScore }}, max {{ $json.maxScore }})\n- Distribución por nivel: {{ JSON.stringify($json.niveles) }}\n- Fortalezas recurrentes: {{ $json.topFortalezas.join('; ') }}\n- Red flags recurrentes: {{ $json.topRedFlags.join('; ') }}\n\nDetalle por CV:\n{{ $json.datosFormateados }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "build-prompt",
+      "name": "BuildPrompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [820, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 2048,\n  \"system\": \"MANDATO DE RAZONAMIENTO DELIBERATIVO (CoT)\\n\\nCuando se requiera aplicar el razonamiento deliberativo, o por defecto en tareas analíticas, DEBES siempre devolver tu respuesta como un ÚNICO objeto JSON válido, siguiendo este protocolo:\\n\\n1. El nivel raíz del JSON debe contener obligatoriamente una propiedad nombrada \\\"pensamiento\\\".\\n2. Dentro de la propiedad \\\"pensamiento\\\", realiza un análisis estructurado en español evaluando:\\n   - Perspectiva de Tercera Persona.\\n   - Recuperación Fáctica: verifica los datos numéricos provistos.\\n   - Detección de Falsedades: no inventes observaciones que no estén soportadas por los datos.\\n   - Filtro Anti-Sicofancia: reporta patrones reales aunque sean negativos.\\n3. El resultado debe incluirse en las otras propiedades del JSON solicitadas. NO incluyas texto markdown ni palabras introductorias fuera de la estructura JSON.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.prompt) }}\n    }\n  ]\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "call-claude-api",
+      "name": "CallClaudeApi",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1040, 240],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\n\nif (item.stop_reason === 'max_tokens') {\n  throw new Error('Respuesta de Claude truncada (max_tokens alcanzado). El JSON está incompleto.');\n}\n\nconst rawText = item.content?.[0]?.text ?? '';\n\nlet parsed;\ntry {\n  const cleaned = rawText.trim().replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (err) {\n  throw new Error('No se pudo parsear el JSON de Claude: ' + err.message + ' | raw=' + rawText.substring(0, 200));\n}\n\ndelete parsed.pensamiento;\n\nconst meta = $('AggregateAndFilter').item.json;\n\nreturn {\n  json: {\n    timestamp: new Date().toISOString(),\n    fecha: meta.fecha,\n    count: meta.count,\n    avgScore: meta.avgScore,\n    maxScore: meta.maxScore,\n    minScore: meta.minScore,\n    niveles: meta.niveles,\n    resumen: parsed.resumen || '',\n    observaciones: Array.isArray(parsed.observaciones) ? parsed.observaciones : [],\n    alertas: Array.isArray(parsed.alertas) ? parsed.alertas : [],\n    recomendacion: parsed.recomendacion || ''\n  }\n};\n"
+      },
+      "id": "parse-claude-response",
+      "name": "ParseClaudeResponse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1260, 240],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $input.item.json;\n\nconst nivelesTxt = Object.entries(j.niveles || {})\n  .map(([k, v]) => `${k}: ${v}`)\n  .join(' · ') || 'sin datos';\n\nconst bullets = (arr, emoji) => (arr && arr.length\n  ? arr.map(x => `${emoji} ${x}`).join('\\n')\n  : `${emoji} _ninguno_`);\n\nconst blocks = [\n  {\n    type: 'header',\n    text: { type: 'plain_text', text: `📊 Resumen Operativo — ${j.fecha}`, emoji: true }\n  },\n  {\n    type: 'section',\n    fields: [\n      { type: 'mrkdwn', text: `*CVs evaluados:*\\n${j.count}` },\n      { type: 'mrkdwn', text: `*Score promedio:*\\n${j.avgScore} (min ${j.minScore} · max ${j.maxScore})` },\n      { type: 'mrkdwn', text: `*Distribución:*\\n${nivelesTxt}` },\n      { type: 'mrkdwn', text: `*Recomendación:*\\n${j.recomendacion || '—'}` }\n    ]\n  },\n  { type: 'divider' },\n  {\n    type: 'section',\n    text: { type: 'mrkdwn', text: `*Resumen:*\\n${j.resumen || '_sin resumen_'}` }\n  },\n  {\n    type: 'section',\n    text: { type: 'mrkdwn', text: `*Observaciones*\\n${bullets(j.observaciones, '•')}` }\n  },\n  {\n    type: 'section',\n    text: { type: 'mrkdwn', text: `*Alertas*\\n${bullets(j.alertas, '⚠️')}` }\n  },\n  {\n    type: 'context',\n    elements: [\n      { type: 'mrkdwn', text: `_Generado automáticamente por n8n + Claude API · ${j.timestamp}_` }\n    ]\n  }\n];\n\nreturn {\n  json: {\n    ...j,\n    blocks,\n    fallbackText: `Resumen Operativo ${j.fecha}: ${j.count} CVs, promedio ${j.avgScore}`\n  }\n};\n"
+      },
+      "id": "build-block-kit",
+      "name": "BuildBlockKit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1480, 240],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $env.SLACK_CHANNEL_RESUMEN }}",
+          "mode": "id"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: $json.blocks }) }}",
+        "otherOptions": {
+          "mrkdwn": true,
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "send-to-slack",
+      "name": "SendToSlack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [1700, 240],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "slackApi": { "id": "SlackBot", "name": "SlackBot" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_BASE_ID }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_TABLE_RUNS }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha": "={{ $('BuildBlockKit').item.json.fecha }}",
+            "totalCVs": "={{ $('BuildBlockKit').item.json.count }}",
+            "avgScore": "={{ $('BuildBlockKit').item.json.avgScore }}",
+            "resumen": "={{ $('BuildBlockKit').item.json.resumen }}",
+            "observaciones": "={{ $('BuildBlockKit').item.json.observaciones.join(' | ') }}",
+            "alertas": "={{ $('BuildBlockKit').item.json.alertas.join(' | ') }}",
+            "recomendacion": "={{ $('BuildBlockKit').item.json.recomendacion }}",
+            "estado": "ok",
+            "createdAt": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "fecha", "displayName": "fecha", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "totalCVs", "displayName": "totalCVs", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "avgScore", "displayName": "avgScore", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "resumen", "displayName": "resumen", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "observaciones", "displayName": "observaciones", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "alertas", "displayName": "alertas", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "recomendacion", "displayName": "recomendacion", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "estado", "displayName": "estado", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "createdAt", "displayName": "createdAt", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-run-to-airtable",
+      "name": "LogRunToAirtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [1920, 240],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "airtableTokenApi": { "id": "AirtableToken", "name": "AirtableToken" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.first()?.json ?? {};\nconst err = payload.error ?? payload;\nconst message = err?.message ?? (typeof err === 'string' ? err : JSON.stringify(err));\n\nlet agg = {};\ntry { agg = $('AggregateAndFilter').item.json; } catch (e) { /* agg sigue vacío */ }\n\nreturn [{\n  json: {\n    ok: false,\n    error: message,\n    timestamp: new Date().toISOString(),\n    fecha: agg.fecha ?? new Date(Date.now() - 86400000).toISOString().split('T')[0],\n    count: agg.count ?? 0,\n    avgScore: agg.avgScore ?? 0\n  }\n}];"
+      },
+      "id": "error-handler",
+      "name": "ErrorHandler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1260, 560]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $env.SLACK_CHANNEL_ERRORS }}",
+          "mode": "id"
+        },
+        "text": "=:warning: *Fallo en Resumidor Operativo* — fecha {{ $json.fecha }}\n*Error:* `{{ $json.error }}`\n*Timestamp:* {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "id": "notify-error-channel",
+      "name": "NotifyErrorChannel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [1480, 560],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "slackApi": { "id": "SlackBot", "name": "SlackBot" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_BASE_ID }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $env.AIRTABLE_TABLE_RUNS }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha": "={{ $json.fecha }}",
+            "totalCVs": "={{ $json.count }}",
+            "avgScore": "={{ $json.avgScore }}",
+            "resumen": "",
+            "observaciones": "",
+            "alertas": "={{ $json.error }}",
+            "recomendacion": "",
+            "estado": "error",
+            "createdAt": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "fecha", "displayName": "fecha", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "totalCVs", "displayName": "totalCVs", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "avgScore", "displayName": "avgScore", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "resumen", "displayName": "resumen", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "observaciones", "displayName": "observaciones", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "alertas", "displayName": "alertas", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "recomendacion", "displayName": "recomendacion", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "estado", "displayName": "estado", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false },
+            { "id": "createdAt", "displayName": "createdAt", "type": "string", "required": false, "display": true, "canBeUsedToMatch": true, "defaultMatch": false }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-error-to-airtable",
+      "name": "LogErrorToAirtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [1700, 560],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "airtableTokenApi": { "id": "AirtableToken", "name": "AirtableToken" }
+      }
+    }
+  ],
+  "connections": {
+    "ScheduleTrigger": {
+      "main": [[{ "node": "ReadSheetData", "type": "main", "index": 0 }]]
+    },
+    "ReadSheetData": {
+      "main": [
+        [{ "node": "AggregateAndFilter", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "AggregateAndFilter": {
+      "main": [
+        [{ "node": "IfHasData", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "IfHasData": {
+      "main": [
+        [{ "node": "BuildPrompt", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "BuildPrompt": {
+      "main": [[{ "node": "CallClaudeApi", "type": "main", "index": 0 }]]
+    },
+    "CallClaudeApi": {
+      "main": [
+        [{ "node": "ParseClaudeResponse", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "ParseClaudeResponse": {
+      "main": [
+        [{ "node": "BuildBlockKit", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "BuildBlockKit": {
+      "main": [
+        [{ "node": "SendToSlack", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "SendToSlack": {
+      "main": [
+        [{ "node": "LogRunToAirtable", "type": "main", "index": 0 }],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "LogRunToAirtable": {
+      "main": [
+        [],
+        [{ "node": "ErrorHandler", "type": "main", "index": 0 }]
+      ]
+    },
+    "ErrorHandler": {
+      "main": [[{ "node": "NotifyErrorChannel", "type": "main", "index": 0 }]]
+    },
+    "NotifyErrorChannel": {
+      "main": [[{ "node": "LogErrorToAirtable", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "resumidor-operativo-portfolio"
+  }
+}
