@@ -13,7 +13,7 @@ con LLMs usando structured outputs y documentación técnica reproducible.
 |---|---------|--------|-------------------|--------|
 | 1 | [01-cv-scorer/](01-cv-scorer/) | CV-Scorer | Webhook → PDF → Claude API (structured output) → Google Sheets | ✅ Funcional |
 | 2 | [02-onboarding-simulado/](02-onboarding-simulado/) | Onboarding Simulado | Formulario → Google Workspace (modo demo) → Slack → Airtable | ✅ Funcional |
-| 3 | [03-resumidor-operativo/](03-resumidor-operativo/) | Resumidor Operativo | Cron diario → Google Sheets → Claude API → Slack Block Kit + Airtable log | ⏳ En despliegue |
+| 3 | [03-resumidor-operativo/](03-resumidor-operativo/) | Resumidor Operativo | Cron diario → Google Sheets → Claude API → Slack Block Kit + Airtable log | ✅ Funcional |
 
 Cada carpeta contiene su propio `README.md` con diagrama de nodos, credenciales
 requeridas, variables de entorno e instrucciones de importación.

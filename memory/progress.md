@@ -38,14 +38,14 @@
 - [x] Exportar workflow.json
 - [x] Escribir README.md
 - [x] Importar workflow en n8n (id=`rBTTePnDgB6JVFXp`) — pendiente vincular credenciales (`SlackBot`, `AirtableToken`)
-- [ ] Crear tabla `Runs` en Airtable con los campos documentados
-- [ ] Crear canal `#resumen-diario` en Slack y setear `SLACK_CHANNEL_RESUMEN` + `AIRTABLE_TABLE_RUNS`
-- [ ] Probar cron con datos reales en Google Sheets (Execute Workflow manual)
-- [ ] Tomar captura → assets/diagram.png
+- [x] Crear tabla `Runs` en Airtable con los campos documentados
+- [x] Crear canal `#resumen-diario` en Slack y setear `SLACK_CHANNEL_RESUMEN` + `AIRTABLE_TABLE_RUNS`
+- [x] Probar cron con datos reales en Google Sheets (Execute Workflow manual)
+- [x] Tomar captura → assets/diagram.png
 
 ## Tareas globales
-- [ ] Completar README.md principal
-- [ ] Verificar .env.example con todas las variables
-- [ ] Revisar .gitignore
+- [x] Completar README.md principal
+- [x] Verificar .env.example con todas las variables
+- [x] Revisar .gitignore
 - [ ] Hacer repo público en GitHub
 - [ ] Añadir link del repo al CV y LinkedIn
