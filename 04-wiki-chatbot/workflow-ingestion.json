@@ -1,0 +1,168 @@
+{
+  "name": "04 — Wiki Ingestion Pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "position": [208, 304],
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "driveId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "My Drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "FOLDER_ID_AQUI"
+          }
+        },
+        "options": {}
+      },
+      "id": "list-files",
+      "name": "List Wiki Files",
+      "position": [432, 304],
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "loop",
+      "name": "Loop Over Items",
+      "position": [640, 304],
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "id": "download",
+      "name": "Download File",
+      "position": [864, 304],
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "documents"
+        },
+        "embeddingBatchSize": 50,
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "vector-store-insert",
+      "name": "Supabase Vector Store",
+      "position": [1088, 304],
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "dataType": "binary",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "={{ $('Download File').item.json.name }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "doc-loader",
+      "name": "Document Loader",
+      "position": [1088, 528],
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "chunkOverlap": 200,
+        "options": {}
+      },
+      "id": "text-splitter",
+      "name": "Text Splitter",
+      "position": [1088, 704],
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "embeddings-insert",
+      "name": "OpenAI Embeddings",
+      "position": [1312, 528],
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "content": "## 📥 Wiki Ingestion Pipeline\n\n**Flujo 04** — Pipeline de ingesta.\n\nLee archivos markdown de Google Drive,\nlos divide en chunks, genera embeddings\ncon OpenAI, y los almacena en Supabase pgvector.\n\n**Pasos:**\n1. Cambiar FOLDER_ID_AQUI por el ID real del folder en Drive\n2. Crear credencial Google Drive OAuth2\n3. Ejecutar manualmente",
+        "height": 260,
+        "width": 300,
+        "color": 4
+      },
+      "id": "sticky-info",
+      "name": "Sticky Note",
+      "position": [160, 80],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Document Loader": {
+      "ai_document": [[{"index": 0, "node": "Supabase Vector Store", "type": "ai_document"}]]
+    },
+    "Download File": {
+      "main": [[{"index": 0, "node": "Supabase Vector Store", "type": "main"}]]
+    },
+    "List Wiki Files": {
+      "main": [[{"index": 0, "node": "Loop Over Items", "type": "main"}]]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [{"index": 0, "node": "Download File", "type": "main"}]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [[{"index": 0, "node": "List Wiki Files", "type": "main"}]]
+    },
+    "OpenAI Embeddings": {
+      "ai_embedding": [[{"index": 0, "node": "Supabase Vector Store", "type": "ai_embedding"}]]
+    },
+    "Supabase Vector Store": {
+      "main": [[{"index": 0, "node": "Loop Over Items", "type": "main"}]]
+    },
+    "Text Splitter": {
+      "ai_textSplitter": [[{"index": 0, "node": "Document Loader", "type": "ai_textSplitter"}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

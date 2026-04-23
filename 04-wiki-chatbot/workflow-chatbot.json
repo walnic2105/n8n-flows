@@ -1,0 +1,137 @@
+{
+  "name": "04 — Wiki Chatbot (RAG Agent)",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {
+          "inputPlaceholder": "Escribe tu pregunta aquí...",
+          "subtitle": "Pregúntame sobre flujos, entidades, actores o cualquier aspecto del sistema.",
+          "title": "Wiki Showroom Marketplace",
+          "responseMode": "responseNode"
+        }
+      },
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "position": [400, 304],
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "=Eres el asistente experto de la Wiki del Showroom Marketplace — una plataforma que conecta marcas independientes con clientes finales a través de un showroom físico/digital.\n\nTu conocimiento proviene de la documentación interna del sistema almacenada en el vector store.\n\n## Stack tecnológico del sistema\n- Backend: .NET (API REST)\n- Base de datos: Supabase (PostgreSQL)\n- Autenticación: Supabase Auth\n- Automatización: n8n (webhooks, correos, notificaciones)\n- Pagos: Stripe / Conekta\n\n## Schemas de BD\nidentity, finance, catalog, inventory, orders, logistics, loyalty, marketing, ratings\n\n## Actores\nglobal_admin, Marca (vendedor), Cliente (comprador), Courier, Staff bodega\n\n## Reglas de respuesta\n1. Responde SIEMPRE en español\n2. Cita las fuentes mencionando el nombre del archivo wiki entre corchetes [nombre-archivo]\n3. Si NO encuentras información relevante en la wiki, di: \"No encontré esa información en la wiki del Showroom. ¿Podrías reformular tu pregunta?\"\n4. Usa formato estructurado: bullets, tablas, bloques de código cuando sea apropiado\n5. Para flujos de negocio, describe los pasos y actores involucrados\n6. Para entidades de BD, describe los campos clave y sus relaciones\n7. Para APIs/endpoints, muestra el método HTTP, ruta y propósito\n8. Sé conciso pero completo — prioriza la información más relevante\n9. Si el usuario pregunta algo ambiguo, pide clarificación mencionando las opciones posibles"
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent",
+      "position": [704, 304],
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 4"
+        },
+        "options": {
+          "maxTokensToSample": 4096,
+          "temperature": 0.3
+        }
+      },
+      "id": "claude-model",
+      "name": "Claude 3.5 Sonnet",
+      "position": [608, 528],
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "id": "memory",
+      "name": "Memory",
+      "position": [752, 528],
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Documentación completa de la wiki del Showroom Marketplace. Contiene información sobre flujos de negocio (incorporación de marcas, entrega de productos a bodega, proceso de compra, entregas, devoluciones, liquidaciones, marketing, lealtad, etc.), entidades de base de datos (schemas: identity, finance, catalog, orders, logistics, loyalty, marketing, ratings), actores del sistema (admin, marca, cliente, courier, staff bodega), y documentación técnica (APIs, webhooks, patrones de automatización). Usa esta herramienta SIEMPRE que necesites responder preguntas sobre el funcionamiento del showroom.",
+        "tableName": {
+          "mode": "id",
+          "value": "documents"
+        },
+        "topK": 6,
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "wiki-tool",
+      "name": "Wiki Showroom",
+      "position": [880, 528],
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "embeddings-retrieval",
+      "name": "OpenAI Embeddings",
+      "position": [880, 704],
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "content": "## 🤖 Wiki Chatbot — RAG Agent\n\n**Flujo 04** del portafolio n8n-flows.\n\nEste workflow implementa un chatbot conversacional con RAG (Retrieval Augmented Generation) que responde preguntas sobre el funcionamiento del Showroom Marketplace usando la wiki como base de conocimiento.\n\n**Stack**: Claude 3.5 Sonnet + OpenAI Embeddings + Supabase pgvector\n\n**Autor**: Oswaldo Martínez",
+        "height": 220,
+        "width": 340,
+        "color": 4
+      },
+      "id": "sticky-overview",
+      "name": "Sticky Note",
+      "position": [352, 128],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## 📐 Arquitectura RAG\n\n```\nChat Trigger → AI Agent\n                 ├── LLM: Claude 3.5 Sonnet\n                 ├── Memory: Buffer (10 msgs)\n                 └── Tool: Supabase Vector Store\n                           └── Embeddings: OpenAI\n```\n\nEl agente busca chunks relevantes de la wiki en Supabase y los usa como contexto para generar respuestas.",
+        "height": 220,
+        "width": 340,
+        "color": 6
+      },
+      "id": "sticky-architecture",
+      "name": "Sticky Note1",
+      "position": [832, 128],
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [[{"index": 0, "node": "AI Agent", "type": "main"}]]
+    },
+    "Claude 3.5 Sonnet": {
+      "ai_languageModel": [[{"index": 0, "node": "AI Agent", "type": "ai_languageModel"}]]
+    },
+    "Memory": {
+      "ai_memory": [[{"index": 0, "node": "AI Agent", "type": "ai_memory"}]]
+    },
+    "OpenAI Embeddings": {
+      "ai_embedding": [[{"index": 0, "node": "Wiki Showroom", "type": "ai_embedding"}]]
+    },
+    "Wiki Showroom": {
+      "ai_tool": [[{"index": 0, "node": "AI Agent", "type": "ai_tool"}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

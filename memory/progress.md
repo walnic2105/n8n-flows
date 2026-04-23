@@ -1,6 +1,6 @@
 # Estado del Proyecto
 
-Última actualización: 2026-04-21 — Flujo 03 (Resumidor Operativo) construido y documentado (workflow.json + README). Pendiente desplegar en n8n, crear tabla `Runs` en Airtable, setear env vars y validar end-to-end.
+Última actualización: 2026-04-22 — Flujo 04 (Wiki Chatbot RAG) construido, desplegado e indexado. Vector store con ~76 archivos .md del Showroom Marketplace en Supabase pgvector.
 
 ## Flujos
 
@@ -42,6 +42,18 @@
 - [x] Crear canal `#resumen-diario` en Slack y setear `SLACK_CHANNEL_RESUMEN` + `AIRTABLE_TABLE_RUNS`
 - [x] Probar cron con datos reales en Google Sheets (Execute Workflow manual)
 - [x] Tomar captura → assets/diagram.png
+
+### 04 — Wiki Chatbot (RAG Agent) ✅
+- [x] Crear carpeta y estructura (workflow-chatbot.json + workflow-ingestion.json)
+- [x] Diseñar arquitectura RAG: Claude Sonnet 4 + OpenAI Embeddings + Supabase pgvector
+- [x] Configurar base de datos vectorial en Supabase (extensión pgvector, tabla `documents`, función `match_documents`)
+- [x] Crear credenciales en n8n: `Supabase account`, `OpenAi account`, `Anthropic account`, `Google Drive account`
+- [x] Construir workflow chatbot en n8n (id=`d1jDkeFVWJDgpLdI`) — 8 nodos (Chat Trigger + AI Agent + Claude + Memory + Vector Store + Embeddings + 2 Sticky Notes)
+- [x] Construir workflow ingestion en n8n (id=`9XypVIK3V1oo38wJ`) — 9 nodos (Manual Trigger + Google Drive List/Download + Loop + Vector Store + Doc Loader + Text Splitter + Embeddings + Sticky Note)
+- [x] Subir 76 archivos .md de la wiki del Showroom a Google Drive (folder: `1m4gpiZaFd5siGWLHikai48L0aZwOaCUT`)
+- [x] Ejecutar pipeline de ingesta — 76 archivos indexados en Supabase pgvector
+- [x] Escribir README.md con arquitectura, nodos, credenciales, SQL de setup e instrucciones
+- [x] Exportar workflow JSONs (sin credenciales) al repositorio
 
 ## Tareas globales
 - [x] Completar README.md principal
